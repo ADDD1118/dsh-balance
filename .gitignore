@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# build caches / generated types
+lib/types/
+*.tsbuildinfo
+*.tsbuildinfo.*
+
+# sourcemaps
+lib/*.map
+
+# local runtime state
+.dsh-update-lock/
+.dsh-update-state.json
+.dsh-pending-update.json
+.dsh-balance-pricing.json
+.DS_Store
+
+# logs
+*.log
+
+# local image-processing artifacts / mascot assets (user-specific, not shipped)
+mascot*
+!lib/mascot.default.png
+preview-*
+served-mascot*
+process-mascot.py
+*.bin

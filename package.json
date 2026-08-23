@@ -1,0 +1,54 @@
+{
+  "name": "dsh-balance",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness (dsh) balance card — floating glass card showing estimated days, live balance and the selected conversation's usage/cost, plus an adjustable-size settings card. 悬浮余额卡片 + 调整大小配置。",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "balance",
+    "usage",
+    "widget"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ADDD1118/dsh-balance.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ADDD1118/dsh-balance/issues"
+  },
+  "homepage": "https://github.com/ADDD1118/dsh-balance#readme",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/mascot.default.png",
+    "lib/types/**/*.d.ts"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=0.0.0",
+    "@deepseek-ai/dsh-settings": ">=0.0.0",
+    "@deepseek-ai/schemastery": ">=0.0.0",
+    "@deepseek-ai/dsh-client-runtime": ">=0.0.0",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": ">=0.0.0"
+  }
+}
