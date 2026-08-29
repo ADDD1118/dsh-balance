@@ -3,6 +3,13 @@
  * background + bubble) is on top and her paws rest right on the liquid-glass
  * balance box, so she appears to cling onto it. The estimated-days value lives
  * in a small glass chip inside the speech bubble (top-left).
+ *
+ * The card stores its position as a *fraction of the free space* (`fx`/`fy` in
+ * [0,1] over the area not occupied by the card itself), not as absolute pixels.
+ * Rendering maps that fraction onto the current viewport, so when the browser
+ * window moves to a differently-sized display (or is resized) the card keeps
+ * its relative placement and never leaves the visible area — no re-snapping or
+ * jump is needed to keep it reachable.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
@@ -27,6 +34,7 @@ interface SessionUsage { input: number; cacheRead: number; output: number; cost:
 
 const POS_STORE = 'dsh-balance-pos'
 const W = 200
+const CARD_H0 = 260 // fallback card height before the DOM reports it
 
 const glass: CSSProperties = {
   background: 'linear-gradient(135deg, rgba(30,40,66,0.5), rgba(16,24,44,0.42))',
@@ -41,15 +49,27 @@ const glass: CSSProperties = {
 const label = (size: number, op = 0.72): CSSProperties => ({ fontSize: size, fontWeight: 600, opacity: op, lineHeight: 1.3, whiteSpace: 'nowrap' })
 const value = (size: number, w = 800): CSSProperties => ({ fontSize: size, fontWeight: w, lineHeight: 1.1, whiteSpace: 'nowrap' })
 
-function restorePos(): { x: number; y: number } {
+function clamp01(v: number): number { return Math.max(0, Math.min(1, v)) }
+
+/** Restore the saved position. New saves are fractions; older saves are pixels. */
+function restorePos(): { fx: number; fy: number } {
   try {
     const raw = localStorage.getItem(POS_STORE)
     if (raw !== null) {
-      const p = JSON.parse(raw) as { x?: number; y?: number }
-      if (typeof p.x === 'number' && typeof p.y === 'number') return { x: p.x, y: p.y }
+      const p = JSON.parse(raw) as { fx?: number; fy?: number; x?: number; y?: number }
+      if (typeof p.fx === 'number' && typeof p.fy === 'number') {
+        return { fx: clamp01(p.fx), fy: clamp01(p.fy) }
+      }
+      // Legacy absolute-pixels: convert against the current viewport so a saved
+      // spot migrates to an equivalent relative position.
+      if (typeof p.x === 'number' && typeof p.y === 'number') {
+        const fx = clamp01(p.x / Math.max(1, window.innerWidth - W))
+        const fy = clamp01(p.y / Math.max(1, window.innerHeight - CARD_H0))
+        return { fx, fy }
+      }
     }
   } catch { /* ignore */ }
-  return { x: Math.max(8, window.innerWidth - W - 14), y: 60 }
+  return { fx: 0.98, fy: 0.08 }
 }
 function fmtMoney(v: number | null): string {
   if (v === null || Number.isNaN(v)) return '—'
@@ -66,6 +86,7 @@ export function BalanceCard({ useSessions, t }: BalanceCardProps) {
   const [sess, setSess] = useState<SessionUsage | null>(null)
   const [width, setWidth] = useState(200)
   const [pos, setPos] = useState(restorePos)
+  const [viewport, setViewport] = useState(() => ({ vw: window.innerWidth, vh: window.innerHeight }))
   const pointer = useRef<{ x: number; y: number } | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
 
@@ -73,32 +94,39 @@ export function BalanceCard({ useSessions, t }: BalanceCardProps) {
   const scale = width / 200
   const fs = (size: number): number => Math.round(size * scale)
 
-  // Clamp the card inside the viewport and snap it to the nearest edge when
-  // it is dragged close. Keeps the widget reachable when the browser moves to
-  // a smaller/differently-sized display.
-  const clampAndSnap = useCallback((x: number, y: number): { x: number; y: number } => {
-    const h = cardRef.current?.offsetHeight ?? 260
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    let cx = Math.max(0, Math.min(x, vw - width))
-    let cy = Math.max(0, Math.min(y, vh - h))
+  // Render-time mapping of the stored fraction onto the current viewport. The
+  // card's own width/height are subtracted so the free space is the fraction's
+  // range; with fx/fy in [0,1] the card is always fully inside the viewport.
+  const cardH = cardRef.current?.offsetHeight ?? CARD_H0
+  const maxX = Math.max(1, viewport.vw - width)
+  const maxY = Math.max(1, viewport.vh - cardH)
+  const left = Math.round(pos.fx * maxX)
+  const top = Math.round(pos.fy * maxY)
+
+  // Convert a desired top-left pixel position into a fraction, clamping to the
+  // free space and snapping to the nearest edge when the card is dragged close.
+  const toFraction = useCallback((x: number, y: number): { fx: number; fy: number } => {
+    const h = cardRef.current?.offsetHeight ?? CARD_H0
+    const mx = Math.max(1, viewport.vw - width)
+    const my = Math.max(1, viewport.vh - h)
+    let cx = Math.max(0, Math.min(x, mx))
+    let cy = Math.max(0, Math.min(y, my))
     const edge = 16
     if (cx <= edge) cx = 0
-    else if (cx >= vw - width - edge) cx = vw - width
+    else if (cx >= mx - edge) cx = mx
     if (cy <= edge) cy = 0
-    else if (cy >= vh - h - edge) cy = vh - h
-    return { x: Math.round(cx), y: Math.round(cy) }
-  }, [width])
+    else if (cy >= my - edge) cy = my
+    return { fx: cx / mx, fy: cy / my }
+  }, [viewport, width])
 
-  // On mount, re-clamp a saved position into the current viewport (the saved
-  // spot may be off-screen after the window moved to another monitor).
+  // Re-render on viewport changes so the fraction->pixel mapping recomputes for
+  // the current window. Because pos is a fraction, the card keeps its relative
+  // placement and stays in-bounds across monitors/resizes — no snapping needed.
   useEffect(() => {
-    const p = clampAndSnap(pos.x, pos.y)
-    if (p.x !== pos.x || p.y !== pos.y) {
-      setPos(p)
-      try { localStorage.setItem(POS_STORE, JSON.stringify(p)) } catch { /* ignore */ }
-    }
-  }, [clampAndSnap])
+    const onResize = () => setViewport({ vw: window.innerWidth, vh: window.innerHeight })
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const sessionId = useSessions((s) => s.current)
 
@@ -135,21 +163,21 @@ export function BalanceCard({ useSessions, t }: BalanceCardProps) {
 
   const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId)
-    pointer.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
-  }, [pos.x, pos.y])
+    pointer.current = { x: e.clientX - left, y: e.clientY - top }
+  }, [left, top])
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (pointer.current === null) return
     if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
-    setPos(clampAndSnap(e.clientX - pointer.current.x, e.clientY - pointer.current.y))
-  }, [clampAndSnap])
+    setPos(toFraction(e.clientX - pointer.current.x, e.clientY - pointer.current.y))
+  }, [toFraction])
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (pointer.current === null) return
     e.currentTarget.releasePointerCapture(e.pointerId)
+    const final = toFraction(e.clientX - pointer.current.x, e.clientY - pointer.current.y)
     pointer.current = null
-    const p = clampAndSnap(pos.x, pos.y)
-    setPos(p)
-    try { localStorage.setItem(POS_STORE, JSON.stringify(p)) } catch { /* ignore */ }
-  }, [pos, clampAndSnap])
+    setPos(final)
+    try { localStorage.setItem(POS_STORE, JSON.stringify(final)) } catch { /* ignore */ }
+  }, [toFraction])
 
   const est = data?.estimate ?? null
   const balance = data?.balance?.balance ?? null
@@ -166,7 +194,7 @@ export function BalanceCard({ useSessions, t }: BalanceCardProps) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       ref={cardRef}
-      style={{ position: 'fixed', left: pos.x, top: pos.y, zIndex: 1050, width, pointerEvents: 'auto', cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
+      style={{ position: 'fixed', left, top, zIndex: 1050, width, pointerEvents: 'auto', cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
       role="dialog"
       aria-label={t('card.days')}
     >
